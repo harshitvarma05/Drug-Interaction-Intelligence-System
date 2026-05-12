@@ -58,6 +58,32 @@
           </div>
         </section>
 
+        <section class="audit glass" aria-labelledby="auditTitle">
+          <div class="section-heading">
+            <div>
+              <h2 id="auditTitle">Automated prescription audit</h2>
+              <p>Paste one medicine per line. The app will match drugs, fill the checker, and run the interaction audit.</p>
+            </div>
+            <button class="ghost-button" id="sampleAuditButton" type="button">Use sample</button>
+          </div>
+          <div class="audit-grid">
+            <label class="audit-input">
+              <span>Prescription list</span>
+              <textarea id="auditText" rows="7" placeholder="Warfarin&#10;Ibuprofen&#10;Apixaban"></textarea>
+              <div class="audit-suggestions" id="auditSuggestions" role="listbox"></div>
+            </label>
+            <div class="audit-panel">
+              <div class="audit-actions">
+                <button class="primary-button" id="runAuditButton" type="button">Run audit</button>
+                <button class="ghost-button" id="clearAuditButton" type="button">Clear</button>
+              </div>
+              <div id="auditStatus" class="audit-status">
+                <p class="muted">No audit run yet.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section class="intelligence glass" id="intelligencePanel" aria-labelledby="intelligenceTitle">
           <div class="section-heading">
             <div>

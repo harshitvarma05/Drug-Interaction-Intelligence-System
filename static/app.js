@@ -20,6 +20,12 @@ const els = {
   addDrugButton: document.querySelector("#addDrugButton"),
   checkButton: document.querySelector("#checkButton"),
   exportReportButton: document.querySelector("#exportReportButton"),
+  sampleAuditButton: document.querySelector("#sampleAuditButton"),
+  runAuditButton: document.querySelector("#runAuditButton"),
+  clearAuditButton: document.querySelector("#clearAuditButton"),
+  auditText: document.querySelector("#auditText"),
+  auditSuggestions: document.querySelector("#auditSuggestions"),
+  auditStatus: document.querySelector("#auditStatus"),
   selectionHint: document.querySelector("#selectionHint"),
   severityFilter: document.querySelector("#severityFilter"),
   resultPanel: document.querySelector("#resultPanel"),
@@ -322,6 +328,19 @@ async function selectDrug(rowId, id, name) {
   loadAlternativeSuggestions();
 }
 
+async function setDrugInRow(rowId, drug) {
+  const row = getRow(rowId);
+  row.drug = { id: drug.id, name: drug.name };
+  row.detail = null;
+  const picker = getPicker(rowId);
+  if (picker) {
+    picker.querySelector("input").value = drug.name;
+    clearSuggestions(picker);
+  }
+  state.activeBrowseId ||= drug.id;
+  await loadDrugDetail(rowId);
+}
+
 function clearDrug(rowId) {
   const row = getRow(rowId);
   const picker = getPicker(rowId);
@@ -382,6 +401,148 @@ async function checkInteractions() {
   state.lastCheckData = data;
   renderMultiResults(data);
   await loadAiInsights(ids);
+}
+
+function parseAuditLines(text) {
+  return [...new Set(String(text || "")
+    .split(/\n|,|;/)
+    .map((item) => item.replace(/\s+\d+(\.\d+)?\s*(mg|mcg|g|ml|tablet|tab|capsule|cap).*$/i, "").trim())
+    .filter((item) => item.length >= 2))].slice(0, 12);
+}
+
+async function matchAuditDrug(name) {
+  const data = await api(`/api/search?q=${encodeURIComponent(name)}`);
+  return data.results?.[0] || null;
+}
+
+function currentAuditLine() {
+  const value = els.auditText.value;
+  const cursor = els.auditText.selectionStart || 0;
+  const start = value.lastIndexOf("\n", cursor - 1) + 1;
+  const nextBreak = value.indexOf("\n", cursor);
+  const end = nextBreak === -1 ? value.length : nextBreak;
+  return {
+    start,
+    end,
+    text: value.slice(start, end).trim(),
+  };
+}
+
+function replaceCurrentAuditLine(drug) {
+  const line = currentAuditLine();
+  const value = els.auditText.value;
+  const replacement = drug.name;
+  els.auditText.value = `${value.slice(0, line.start)}${replacement}${value.slice(line.end)}`;
+  const cursor = line.start + replacement.length;
+  els.auditText.focus();
+  els.auditText.setSelectionRange(cursor, cursor);
+  closeAuditSuggestions();
+}
+
+function closeAuditSuggestions() {
+  els.auditSuggestions.classList.remove("open");
+  els.auditSuggestions.innerHTML = "";
+}
+
+async function updateAuditSuggestions() {
+  const line = currentAuditLine();
+  if (line.text.length < 2) {
+    closeAuditSuggestions();
+    return;
+  }
+
+  const data = await api(`/api/search?q=${encodeURIComponent(line.text)}`);
+  const results = (data.results || []).slice(0, 5);
+  if (!results.length) {
+    closeAuditSuggestions();
+    return;
+  }
+
+  els.auditSuggestions.innerHTML = `
+    <div class="audit-suggestion-label">Suggested matches</div>
+    ${results
+    .map((drug) => `
+      <button class="audit-suggestion" type="button" data-id="${escapeHtml(drug.id)}" data-name="${escapeHtml(drug.name)}">
+        <strong>${escapeHtml(drug.name)}</strong>
+        <span>${escapeHtml(drug.synonym ? `Synonym: ${drug.synonym}` : drug.id)}</span>
+      </button>
+    `)
+    .join("")}
+  `;
+  els.auditSuggestions.classList.add("open");
+  els.auditSuggestions.querySelectorAll(".audit-suggestion").forEach((button) => {
+    button.addEventListener("click", () => replaceCurrentAuditLine({ id: button.dataset.id, name: button.dataset.name }));
+  });
+}
+
+function renderAuditMatches(matches, missing = []) {
+  const matchedRows = matches
+    .map((match) => `
+      <div class="audit-match ok">
+        <strong>${escapeHtml(match.input)}</strong>
+        <span>${escapeHtml(match.drug.name)} · ${escapeHtml(match.drug.id)}</span>
+      </div>
+    `)
+    .join("");
+  const missingRows = missing
+    .map((name) => `
+      <div class="audit-match missing">
+        <strong>${escapeHtml(name)}</strong>
+        <span>No confident DrugBank match</span>
+      </div>
+    `)
+    .join("");
+
+  els.auditStatus.innerHTML = `
+    <div class="audit-summary">
+      <span><strong>${matches.length}</strong> matched</span>
+      <span><strong>${missing.length}</strong> unmatched</span>
+    </div>
+    <div class="audit-matches">${matchedRows}${missingRows}</div>
+  `;
+}
+
+async function runPrescriptionAudit() {
+  const names = parseAuditLines(els.auditText.value);
+  if (names.length < 2) {
+    els.auditStatus.innerHTML = `<p class="error">Paste at least two medicines to audit.</p>`;
+    return;
+  }
+
+  els.auditStatus.innerHTML = `<p class="muted">Matching ${names.length} medicines against DrugBank...</p>`;
+  const results = await Promise.all(names.map(async (name) => ({ input: name, drug: await matchAuditDrug(name) })));
+  const matches = [];
+  const missing = [];
+  for (const item of results) {
+    if (item.drug && !matches.some((match) => match.drug.id === item.drug.id)) {
+      matches.push(item);
+    } else {
+      missing.push(item.input);
+    }
+  }
+
+  renderAuditMatches(matches, missing);
+  if (matches.length < 2) {
+    els.selectionHint.textContent = "Audit needs at least two matched medicines.";
+    return;
+  }
+
+  state.rows = [];
+  state.activeBrowseId = null;
+  matches.forEach((match) => addDrugRow(match.drug));
+  while (state.rows.length < 2) addDrugRow();
+  renderDrugRows();
+  for (let index = 0; index < matches.length; index += 1) {
+    await setDrugInRow(state.rows[index].rowId, matches[index].drug);
+  }
+  state.activeBrowseId = matches[0].drug.id;
+  updateSelectedState(`Audit loaded ${matches.length} matched medicines.`);
+  renderDrugRows();
+  renderDetails();
+  renderBrowseTabs();
+  await loadInteractionList();
+  await loadAlternativeSuggestions();
+  await checkInteractions();
 }
 
 function renderMultiResults(data) {
@@ -528,20 +689,31 @@ function renderExplainableAi(data) {
   const topSignals = (data.contexts || []).flatMap((context) =>
     (context.signals || []).slice(0, 3).map((signal) => ({ ...signal, context: context.label })),
   ).slice(0, 8);
+  const method = data.method || {};
 
   els.explainableAi.innerHTML = `
-    <p class="ai-mode">${escapeHtml(data.mode)}</p>
-    ${bulletList(data.explanation || [])}
+    <div class="explain-method">
+      <span>${escapeHtml(data.mode)}</span>
+      <span>${escapeHtml(method.scoreRange || "0-100")}</span>
+    </div>
+    <div class="explain-summary">
+      ${bulletList(data.explanation || [])}
+    </div>
     <div class="evidence-list">
       ${topSignals
         .map((signal) => `
           <article class="evidence-row">
             <div class="evidence-head">
-              <strong>${escapeHtml(signal.context)} · ${escapeHtml(signal.drugName)}</strong>
-              <span>${escapeHtml(signal.source)} · +${escapeHtml(signal.points)} pts</span>
+              <div>
+                <strong>${escapeHtml(signal.context)}</strong>
+                <span>${escapeHtml(signal.drugName)}</span>
+              </div>
+              <b>${escapeHtml(signal.source)} · +${escapeHtml(signal.points)} pts</b>
             </div>
             <p>${escapeHtml(signal.excerpt)}</p>
-            <small>Matched: ${escapeHtml(signal.matched.join(", "))}</small>
+            <div class="match-tags" aria-label="Matched evidence terms">
+              ${(signal.matched || []).map((term) => `<span>${escapeHtml(term)}</span>`).join("")}
+            </div>
           </article>
         `)
         .join("") || `<p class="muted">No evidence snippets matched the selected contexts.</p>`}
@@ -821,11 +993,40 @@ function valueList(items, mapper = (item) => item) {
   return clean.length ? bulletList(clean.slice(0, 10)) : `<p class="muted">Not listed.</p>`;
 }
 
+function profileSection(title, content) {
+  if (!content) return "";
+  return `
+    <article class="profile-section">
+      <h3>${escapeHtml(title)}</h3>
+      ${content}
+    </article>
+  `;
+}
+
+function hasItems(items) {
+  return Array.isArray(items) && items.length > 0;
+}
+
 async function openDrugProfile(drugId) {
   const data = await api(`/api/drugs/${encodeURIComponent(drugId)}`);
   if (data.error) return;
   document.querySelector(".profile-modal")?.remove();
   const drug = data.drug;
+  const transportItems = [...(data.carriers || []), ...(data.transporters || [])];
+  const optionalSections = [
+    profileSection("Food warnings", hasItems(data.foodInteractions) ? valueList(data.foodInteractions) : ""),
+    profileSection("Targets", hasItems(data.targets) ? valueList(data.targets, (item) => [item.name, item.action, item.organism].filter(Boolean).join(" · ")) : ""),
+    profileSection("Enzymes", hasItems(data.enzymes) ? valueList(data.enzymes, (item) => [item.name, item.organism].filter(Boolean).join(" · ")) : ""),
+    profileSection("Dosages", hasItems(data.dosages) ? valueList(data.dosages, (item) => [item.strength, item.form, item.route].filter(Boolean).join(" · ")) : ""),
+    profileSection("Products", hasItems(data.products) ? valueList(data.products, (item) => [item.name, item.form, item.route].filter(Boolean).join(" · ")) : ""),
+    profileSection("Transport", hasItems(transportItems) ? valueList(transportItems) : ""),
+    profileSection(
+      "Categories",
+      hasItems(data.categories)
+        ? `<div class="tags">${data.categories.slice(0, 12).map((category) => `<span class="pill">${escapeHtml(category)}</span>`).join("")}</div>`
+        : "",
+    ),
+  ].join("");
   const modal = document.createElement("div");
   modal.className = "profile-modal";
   modal.innerHTML = `
@@ -844,34 +1045,7 @@ async function openDrugProfile(drugId) {
           <h3>Description</h3>
           ${expandableText(`${drug.name} description`, drug.description || "Not listed.", 520, 4)}
         </article>
-        <article class="profile-section">
-          <h3>Food warnings</h3>
-          ${valueList(data.foodInteractions)}
-        </article>
-        <article class="profile-section">
-          <h3>Targets</h3>
-          ${valueList(data.targets || [], (item) => [item.name, item.action, item.organism].filter(Boolean).join(" · "))}
-        </article>
-        <article class="profile-section">
-          <h3>Enzymes</h3>
-          ${valueList(data.enzymes || [], (item) => [item.name, item.organism].filter(Boolean).join(" · "))}
-        </article>
-        <article class="profile-section">
-          <h3>Dosages</h3>
-          ${valueList(data.dosages || [], (item) => [item.strength, item.form, item.route].filter(Boolean).join(" · "))}
-        </article>
-        <article class="profile-section">
-          <h3>Products</h3>
-          ${valueList(data.products || [], (item) => [item.name, item.form, item.route].filter(Boolean).join(" · "))}
-        </article>
-        <article class="profile-section">
-          <h3>Transport</h3>
-          ${valueList([...(data.carriers || []), ...(data.transporters || [])])}
-        </article>
-        <article class="profile-section">
-          <h3>Categories</h3>
-          <div class="tags">${(data.categories || []).slice(0, 12).map((category) => `<span class="pill">${escapeHtml(category)}</span>`).join("") || "<p class=\"muted\">Not listed.</p>"}</div>
-        </article>
+        ${optionalSections || `<article class="profile-section"><h3>Structured fields</h3><p class="muted">No additional structured profile rows were imported for this drug.</p></article>`}
       </div>
     </section>
   `;
@@ -961,6 +1135,9 @@ document.addEventListener("click", (event) => {
   if (!event.target.closest(".drug-picker")) {
     els.drugRows.querySelectorAll(".suggestions").forEach((suggestions) => suggestions.classList.remove("open"));
   }
+  if (!event.target.closest(".audit-input")) {
+    closeAuditSuggestions();
+  }
 
   const readMoreButton = event.target.closest('[data-action="read-more"]');
   if (readMoreButton) {
@@ -997,6 +1174,24 @@ els.addDrugButton.addEventListener("click", () => {
 
 els.checkButton.addEventListener("click", checkInteractions);
 els.exportReportButton.addEventListener("click", exportReport);
+els.runAuditButton.addEventListener("click", runPrescriptionAudit);
+els.sampleAuditButton.addEventListener("click", () => {
+  els.auditText.value = "Warfarin\nIbuprofen\nApixaban";
+  closeAuditSuggestions();
+});
+els.clearAuditButton.addEventListener("click", () => {
+  els.auditText.value = "";
+  els.auditStatus.innerHTML = `<p class="muted">No audit run yet.</p>`;
+  closeAuditSuggestions();
+});
+els.auditText.addEventListener("input", () => {
+  window.clearTimeout(state.searchTimers.audit);
+  state.searchTimers.audit = window.setTimeout(updateAuditSuggestions, 160);
+});
+els.auditText.addEventListener("click", updateAuditSuggestions);
+els.auditText.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeAuditSuggestions();
+});
 
 els.severityFilter.querySelectorAll(".filter-chip").forEach((button) => {
   button.addEventListener("click", () => {

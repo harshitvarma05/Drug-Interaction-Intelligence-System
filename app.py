@@ -60,9 +60,9 @@ PATIENT_CONTEXT_RULES = {
     },
     "alcohol": {
         "label": "Alcohol use",
-        "terms": ("alcohol", "ethanol", "cns depression", "sedation", "drowsiness", "liver", "hepatic"),
+        "terms": ("avoid alcohol", "alcohol use", "ethanol", "cns depression", "sedation", "drowsiness", "somnolence"),
         "points": 8,
-        "monitor": "Review CNS depression, hepatic metabolism, toxicity, and counseling language.",
+        "monitor": "Review alcohol-specific counseling, CNS depression, sedation, and toxicity language.",
     },
 }
 
