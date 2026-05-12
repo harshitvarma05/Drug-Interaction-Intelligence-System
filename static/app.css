@@ -195,13 +195,172 @@ main {
 
 .checker,
 .browse,
+.intelligence,
 .panel {
   border-radius: 18px;
 }
 
 .checker,
-.browse {
+.browse,
+.intelligence {
   padding: 24px;
+}
+
+.ai-badge {
+  border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel-strong));
+  color: var(--accent);
+  padding: 7px 12px;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.intelligence-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(340px, 1.2fr);
+  gap: 14px;
+}
+
+.insight-card {
+  min-height: 250px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--field);
+  padding: 16px;
+  overflow: hidden;
+}
+
+.insight-card h3 {
+  margin-bottom: 12px;
+}
+
+.insight-empty,
+.graph-empty {
+  color: var(--muted);
+}
+
+.ai-mode {
+  display: inline-flex;
+  margin-bottom: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+  padding: 5px 9px;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.mini-stack,
+.warning-group,
+.signal-group {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.mini-risk,
+.signal-row {
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--panel-strong) 70%, transparent);
+  padding: 9px;
+}
+
+.mini-risk span,
+.signal-row span {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.mini-risk.high {
+  border-color: color-mix(in srgb, var(--danger) 36%, var(--line));
+}
+
+.mini-risk.moderate {
+  border-color: color-mix(in srgb, var(--warn) 36%, var(--line));
+}
+
+.interaction-svg {
+  width: 100%;
+  min-height: 230px;
+}
+
+.graph-edge {
+  stroke: var(--muted);
+  stroke-width: 3;
+  opacity: 0.7;
+}
+
+.graph-edge.high {
+  stroke: var(--danger);
+  stroke-width: 5;
+}
+
+.graph-edge.moderate {
+  stroke: var(--warn);
+}
+
+.graph-edge.informational {
+  stroke: var(--ok);
+}
+
+.graph-edge.none {
+  stroke-dasharray: 7 7;
+  opacity: 0.35;
+}
+
+.graph-node circle {
+  fill: color-mix(in srgb, var(--accent) 18%, var(--panel-strong));
+  stroke: color-mix(in srgb, var(--accent) 55%, var(--line));
+  stroke-width: 2;
+}
+
+.graph-node text {
+  fill: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.graph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.graph-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend {
+  width: 18px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--muted);
+}
+
+.legend.high {
+  background: var(--danger);
+}
+
+.legend.moderate {
+  background: var(--warn);
+}
+
+.legend.none {
+  opacity: 0.4;
+}
+
+.warning-group h4,
+.signal-group h4 {
+  margin: 0;
 }
 
 .section-heading {
@@ -757,8 +916,13 @@ input:focus,
   }
 
   .checker,
-  .browse {
+  .browse,
+  .intelligence {
     padding: 18px;
+  }
+
+  .intelligence-grid {
+    grid-template-columns: 1fr;
   }
 
   .meta-grid {
@@ -767,10 +931,6 @@ input:focus,
 
   .details-grid {
     grid-template-columns: 1fr;
-  }
-
-  .panel {
-    height: 620px;
   }
 
   #browseFilter {

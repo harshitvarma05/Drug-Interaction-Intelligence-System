@@ -113,6 +113,9 @@ class NeuroPharmHandler(BaseHTTPRequestHandler):
             elif path == "/api/check-many":
                 params = parse_qs(parsed.query)
                 self.send_json(self.check_many(params.get("ids", [""])[0]))
+            elif path == "/api/ai-insights":
+                params = parse_qs(parsed.query)
+                self.send_json(self.ai_insights(params.get("ids", [""])[0]))
             elif path.startswith("/api/drugs/") and path.endswith("/interactions"):
                 drug_id = path.removeprefix("/api/drugs/").removesuffix("/interactions").strip("/")
                 params = parse_qs(parsed.query)
@@ -343,6 +346,172 @@ class NeuroPharmHandler(BaseHTTPRequestHandler):
                 "checked": len(pairs),
                 "found": sum(1 for pair in pairs if pair["found"]),
             },
+        }
+
+    def parsed_ids(self, raw_ids: str, max_ids: int = 12) -> tuple[list[str], str | None]:
+        ids: list[str] = []
+        for drug_id in raw_ids.split(","):
+            clean_id = drug_id.strip()
+            if clean_id and clean_id not in ids:
+                ids.append(clean_id)
+        if len(ids) < 2:
+            return ids, "Select at least two drugs."
+        if len(ids) > max_ids:
+            return ids, f"Please use {max_ids} drugs or fewer."
+        return ids, None
+
+    def ai_insights(self, raw_ids: str) -> dict:
+        ids, error = self.parsed_ids(raw_ids)
+        if error:
+            return {"error": error}
+
+        placeholders = ",".join("?" for _ in ids)
+        with get_db() as db:
+            drug_rows = db.execute(
+                f"SELECT drugbank_id, name FROM drugs WHERE drugbank_id IN ({placeholders})",
+                ids,
+            ).fetchall()
+            drugs_by_id = {row["drugbank_id"]: row["name"] or row["drugbank_id"] for row in drug_rows}
+            if len(drugs_by_id) != len(ids):
+                return {"error": "One or more selected drugs could not be found."}
+
+            interaction_rows = db.execute(
+                f"""
+                SELECT drug1_id, drug2_id, description
+                FROM drug_interactions
+                WHERE drug1_id IN ({placeholders})
+                  AND drug2_id IN ({placeholders})
+                """,
+                [*ids, *ids],
+            ).fetchall()
+            food_rows = db.execute(
+                f"""
+                SELECT drug_id, description
+                FROM food_interactions
+                WHERE drug_id IN ({placeholders})
+                ORDER BY drug_id
+                """,
+                ids,
+            ).fetchall()
+            category_rows = db.execute(
+                f"""
+                SELECT drug_id, category AS item
+                FROM categories
+                WHERE drug_id IN ({placeholders})
+                """,
+                ids,
+            ).fetchall()
+            target_rows = db.execute(
+                f"""
+                SELECT drug_id, name AS item
+                FROM targets
+                WHERE drug_id IN ({placeholders})
+                """,
+                ids,
+            ).fetchall()
+            enzyme_rows = db.execute(
+                f"""
+                SELECT drug_id, name AS item
+                FROM enzymes
+                WHERE drug_id IN ({placeholders})
+                """,
+                ids,
+            ).fetchall()
+
+        interaction_by_pair: dict[frozenset[str], sqlite3.Row] = {}
+        for row in interaction_rows:
+            interaction_by_pair.setdefault(frozenset((row["drug1_id"], row["drug2_id"])), row)
+
+        edges = []
+        found_edges = []
+        high_count = 0
+        for index, drug1_id in enumerate(ids):
+            for drug2_id in ids[index + 1 :]:
+                row = interaction_by_pair.get(frozenset((drug1_id, drug2_id)))
+                edge = {
+                    "source": drug1_id,
+                    "target": drug2_id,
+                    "sourceName": drugs_by_id[drug1_id],
+                    "targetName": drugs_by_id[drug2_id],
+                    "found": row is not None,
+                    "severity": "none",
+                    "label": "No listed interaction",
+                    "description": "",
+                }
+                if row is not None:
+                    severity, label = severity_for(row["description"])
+                    edge.update(
+                        {
+                            "found": True,
+                            "severity": severity,
+                            "label": label,
+                            "description": clean_text(row["description"]),
+                        }
+                    )
+                    found_edges.append(edge)
+                    if severity == "high":
+                        high_count += 1
+                edges.append(edge)
+
+        food_by_drug: dict[str, list[str]] = {drug_id: [] for drug_id in ids}
+        for row in food_rows:
+            food_by_drug[row["drug_id"]].append(clean_text(row["description"]))
+
+        def shared_items(rows: list[sqlite3.Row], limit: int = 8) -> list[dict]:
+            item_map: dict[str, set[str]] = {}
+            for row in rows:
+                item = clean_text(row["item"])
+                if item:
+                    item_map.setdefault(item, set()).add(row["drug_id"])
+            shared = [
+                {
+                    "name": item,
+                    "drugs": [drugs_by_id[drug_id] for drug_id in drug_ids if drug_id in drugs_by_id],
+                }
+                for item, drug_ids in item_map.items()
+                if len(drug_ids) > 1
+            ]
+            shared.sort(key=lambda item: (-len(item["drugs"]), item["name"].lower()))
+            return shared[:limit]
+
+        total_pairs = (len(ids) * (len(ids) - 1)) // 2
+        food_count = sum(len(items) for items in food_by_drug.values())
+        summary = []
+        if found_edges:
+            summary.append(f"{len(found_edges)} of {total_pairs} selected drug pairs have listed DrugBank interactions.")
+        else:
+            summary.append(f"No listed DrugBank interaction rows were found among the {total_pairs} selected pairs.")
+        if high_count:
+            summary.append(f"{high_count} interaction(s) contain high-attention risk language such as bleeding, hemorrhage, toxicity, or contraindication.")
+        else:
+            summary.append("No high-attention keyword pattern was detected in the selected interaction descriptions.")
+        if food_count:
+            summary.append(f"{food_count} food or supplement warning(s) were found for the selected drugs.")
+        if len(shared_items(target_rows, 3)) or len(shared_items(enzyme_rows, 3)):
+            summary.append("Shared target or enzyme signals suggest possible mechanistic overlap worth reviewing.")
+        else:
+            summary.append("No shared target/enzyme overlap was detected from the available structured fields.")
+
+        return {
+            "mode": "Local AI-style risk summarizer",
+            "nodes": [{"id": drug_id, "name": drugs_by_id[drug_id]} for drug_id in ids],
+            "edges": edges,
+            "summary": summary,
+            "foodWarnings": [
+                {
+                    "drugId": drug_id,
+                    "drugName": drugs_by_id[drug_id],
+                    "warnings": warnings,
+                }
+                for drug_id, warnings in food_by_drug.items()
+                if warnings
+            ],
+            "shared": {
+                "categories": shared_items(category_rows),
+                "targets": shared_items(target_rows),
+                "enzymes": shared_items(enzyme_rows),
+            },
+            "topInteractions": found_edges[:6],
         }
 
     def check_pair(self, drug1: str, drug2: str) -> dict:

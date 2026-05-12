@@ -16,6 +16,10 @@ const els = {
   checkButton: document.querySelector("#checkButton"),
   selectionHint: document.querySelector("#selectionHint"),
   resultPanel: document.querySelector("#resultPanel"),
+  aiSummary: document.querySelector("#aiSummary"),
+  interactionGraph: document.querySelector("#interactionGraph"),
+  foodWarnings: document.querySelector("#foodWarnings"),
+  sharedSignals: document.querySelector("#sharedSignals"),
   detailsGrid: document.querySelector("#detailsGrid"),
   browseTabs: document.querySelector("#browseTabs"),
   browseFilter: document.querySelector("#browseFilter"),
@@ -334,6 +338,7 @@ function updateSelectedState(message = "") {
   } else {
     els.selectionHint.textContent = "Select at least two drugs.";
   }
+  if (count < 2) resetInsights();
 }
 
 async function loadDrugDetail(rowId) {
@@ -358,6 +363,7 @@ async function checkInteractions() {
     return;
   }
   renderMultiResults(data);
+  await loadAiInsights(ids);
 }
 
 function renderMultiResults(data) {
@@ -400,6 +406,157 @@ function renderPairResult(pair) {
       </div>
     </article>
   `;
+}
+
+function resetInsights() {
+  els.aiSummary.innerHTML = "No analysis yet.";
+  els.interactionGraph.innerHTML = "No graph yet.";
+  els.foodWarnings.innerHTML = "No selected-drug food warnings yet.";
+  els.sharedSignals.innerHTML = "No shared target, enzyme, or category signals yet.";
+}
+
+async function loadAiInsights(ids) {
+  els.aiSummary.innerHTML = `<p class="muted">Analyzing selected DrugBank records...</p>`;
+  els.interactionGraph.innerHTML = `<p class="muted">Building graph...</p>`;
+  els.foodWarnings.innerHTML = `<p class="muted">Checking food interactions...</p>`;
+  els.sharedSignals.innerHTML = `<p class="muted">Scanning mechanisms...</p>`;
+
+  const data = await api(`/api/ai-insights?ids=${encodeURIComponent(ids)}`);
+  if (data.error) {
+    els.aiSummary.innerHTML = `<p class="error">${escapeHtml(data.error)}</p>`;
+    return;
+  }
+  renderAiSummary(data);
+  renderInteractionGraph(data);
+  renderFoodWarnings(data.foodWarnings);
+  renderSharedSignals(data.shared);
+}
+
+function renderAiSummary(data) {
+  const top = data.topInteractions?.length
+    ? `
+      <div class="mini-stack">
+        ${data.topInteractions
+          .slice(0, 3)
+          .map((edge) => `
+            <div class="mini-risk ${edge.severity}">
+              <strong>${escapeHtml(edge.sourceName)} + ${escapeHtml(edge.targetName)}</strong>
+              <span>${escapeHtml(edge.label)}</span>
+            </div>
+          `)
+          .join("")}
+      </div>
+    `
+    : "";
+
+  els.aiSummary.innerHTML = `
+    <p class="ai-mode">${escapeHtml(data.mode)}</p>
+    ${bulletList(data.summary)}
+    ${top}
+  `;
+}
+
+function renderInteractionGraph(data) {
+  const nodes = data.nodes || [];
+  const edges = data.edges || [];
+  if (!nodes.length) {
+    els.interactionGraph.innerHTML = `<p class="muted">No graph available.</p>`;
+    return;
+  }
+
+  const width = 520;
+  const height = 300;
+  const centerX = width / 2;
+  const centerY = height / 2;
+  const radius = nodes.length <= 2 ? 95 : 110;
+  const positions = {};
+  nodes.forEach((node, index) => {
+    const angle = nodes.length === 1 ? 0 : (Math.PI * 2 * index) / nodes.length - Math.PI / 2;
+    positions[node.id] = {
+      x: centerX + Math.cos(angle) * radius,
+      y: centerY + Math.sin(angle) * radius,
+    };
+  });
+
+  const edgeMarkup = edges
+    .map((edge) => {
+      const source = positions[edge.source];
+      const target = positions[edge.target];
+      const cls = edge.found ? edge.severity : "none";
+      return `<line class="graph-edge ${cls}" x1="${source.x}" y1="${source.y}" x2="${target.x}" y2="${target.y}"><title>${escapeHtml(edge.sourceName)} + ${escapeHtml(edge.targetName)}: ${escapeHtml(edge.label)}</title></line>`;
+    })
+    .join("");
+
+  const nodeMarkup = nodes
+    .map((node) => {
+      const position = positions[node.id];
+      return `
+        <g class="graph-node">
+          <circle cx="${position.x}" cy="${position.y}" r="30"></circle>
+          <text x="${position.x}" y="${position.y + 5}" text-anchor="middle">${escapeHtml(node.name.slice(0, 3))}</text>
+          <title>${escapeHtml(node.name)}</title>
+        </g>
+      `;
+    })
+    .join("");
+
+  const legend = `
+    <div class="graph-legend">
+      <span><i class="legend high"></i>High</span>
+      <span><i class="legend moderate"></i>Monitor</span>
+      <span><i class="legend none"></i>No listed row</span>
+    </div>
+  `;
+
+  els.interactionGraph.innerHTML = `
+    <svg class="interaction-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Drug interaction graph">
+      ${edgeMarkup}
+      ${nodeMarkup}
+    </svg>
+    ${legend}
+  `;
+}
+
+function renderFoodWarnings(warnings) {
+  if (!warnings?.length) {
+    els.foodWarnings.innerHTML = `<p class="muted">No food interaction warnings were listed for these selections.</p>`;
+    return;
+  }
+  els.foodWarnings.innerHTML = warnings
+    .map((item) => `
+      <div class="warning-group">
+        <h4>${escapeHtml(item.drugName)}</h4>
+        ${bulletList(item.warnings.slice(0, 4))}
+      </div>
+    `)
+    .join("");
+}
+
+function renderSharedSignals(shared) {
+  const groups = [
+    ["Shared categories", shared?.categories || []],
+    ["Shared targets", shared?.targets || []],
+    ["Shared enzymes", shared?.enzymes || []],
+  ];
+  const html = groups
+    .filter(([, items]) => items.length)
+    .map(([title, items]) => `
+      <div class="signal-group">
+        <h4>${escapeHtml(title)}</h4>
+        ${items
+          .slice(0, 5)
+          .map((item) => `
+            <div class="signal-row">
+              <strong>${escapeHtml(item.name)}</strong>
+              <span>${escapeHtml(item.drugs.join(", "))}</span>
+            </div>
+          `)
+          .join("")}
+      </div>
+    `)
+    .join("");
+
+  els.sharedSignals.innerHTML = html || `<p class="muted">No shared structured signals were detected.</p>`;
 }
 
 function renderDetails() {
