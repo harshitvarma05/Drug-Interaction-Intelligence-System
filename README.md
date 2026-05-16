@@ -1,6 +1,6 @@
 # NeuroPharmDB
 
-An Apple-inspired, local-first drug-drug interaction web app powered by a DrugBank SQLite database. NeuroPharmDB lets users search medicines, audit prescription lists, inspect interaction risk, and generate explainable AI-style patient-context insights without sending data to any external API.
+A local-first drug-drug interaction web app powered by a DrugBank SQLite database. NeuroPharmDB lets users search medicines, audit prescription lists, inspect interaction risk, and generate explainable AI-style patient-context insights without sending data to any external API.
 
 > Built for fast clinical-style exploration, academic demos, and explainable pharmacology workflows.
 
@@ -169,8 +169,4 @@ DrugBank content may require appropriate licensing depending on use and distribu
 - Safer alternative ranking against the current medication list
 - Lab monitoring recommendations
 - Admin/import script for refreshing DrugBank data
-
-## Author
-
-Built by Harshit as a full-stack pharmacology informatics project.
 
