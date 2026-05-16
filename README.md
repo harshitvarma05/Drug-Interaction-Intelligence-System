@@ -56,8 +56,7 @@ Recommended demo:
 ```text
 NeuroPharmDB 2.0/
 ├── app.py                 # Python HTTP server and API endpoints
-├── drugbank_full.db       # Local DrugBank SQLite database
-├── drugbank_full.db.zip   # Compressed database archive
+├── drugbank_full.db       # Local database file, not included in this repo
 ├── static/
 │   ├── index.html         # App shell
 │   ├── app.css            # Apple-like glass UI
@@ -70,17 +69,19 @@ NeuroPharmDB 2.0/
 Clone the repo:
 
 ```bash
-git clone <your-repo-url>
-cd "NeuroPharmDB 2.0"
+git clone <repo-url>
+cd "<repo-name>"
 ```
 
-Make sure the database exists:
+This project requires a local DrugBank SQLite database named `drugbank_full.db` in the project root.
+
+Due to DrugBank licensing restrictions, the database is not included in this repository. Obtain DrugBank access separately under your own license, then place your local SQLite export here:
 
 ```bash
 ls drugbank_full.db
 ```
 
-If only the zip file is present:
+If you keep your licensed database as a private local archive, unzip it locally before running the app:
 
 ```bash
 unzip drugbank_full.db.zip
@@ -158,7 +159,7 @@ Every result includes:
 
 NeuroPharmDB is a research and educational decision-support tool. It is not a medical device, does not provide medical advice, and should not be used as a substitute for professional clinical judgment.
 
-DrugBank content may require appropriate licensing depending on use and distribution. Do not publish proprietary DrugBank data unless your license allows it.
+DrugBank content requires appropriate licensing. This repository should not include `drugbank_full.db`, `drugbank_full.db.zip`, or any proprietary DrugBank export unless your license explicitly allows redistribution.
 
 ## Roadmap Ideas
 
@@ -169,4 +170,3 @@ DrugBank content may require appropriate licensing depending on use and distribu
 - Safer alternative ranking against the current medication list
 - Lab monitoring recommendations
 - Admin/import script for refreshing DrugBank data
-
